@@ -6,8 +6,6 @@ from app.core.database import get_db
 
 from app.models.transaction import Transaction
 from app.models.user import User
-
-# ✅ IMPORT CORRIGÉ ET VALIDÉ
 from app.schemas.transaction import TransactionBatchRequest
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
@@ -16,7 +14,10 @@ router = APIRouter(prefix="/transactions", tags=["Transactions"])
 def sync_batch_transactions(batch: TransactionBatchRequest, db: Session = Depends(get_db)):
     print(f"📥 Batch de {len(batch.transactions)} txs reçu du device {batch.device_id}")
     
-    report = {"processed": 0, "failed": 0, "errors": [], "status": "partial_success"}
+    report = {"processed": 0, "failed": 0, "errors": []}
+    
+    # 🔥 LA LISTE CRITIQUE : Le Reçu (ACK) pour le téléphone
+    synced_uuids = []
     
     # 1. Vérif Marchand
     merchant = db.query(User).filter(User.public_key == batch.merchant_pk).first()
@@ -28,29 +29,28 @@ def sync_batch_transactions(batch: TransactionBatchRequest, db: Session = Depend
             # 2. Idempotence (On ne traite pas deux fois le même UUID)
             exists = db.query(Transaction).filter(Transaction.transaction_uuid == tx.uuid).first()
             if exists: 
+                # Si elle existe déjà, on dit au téléphone "C'est bon, je l'ai"
+                # pour qu'il arrête de bloquer le solde offline.
+                synced_uuids.append(tx.uuid)
                 continue 
 
-            # 3. Anti-Rejeu (Le Nonce protège contre la duplication cryptographique)
-            nonce_exists = db.query(Transaction).filter(Transaction.nonce == tx.nonce).first()
-            if nonce_exists: 
-                continue
-
-            # 4. Accounting (Mise à jour des soldes "theoriques" pour affichage)
-            # Note: Le vrai solde est calculé par Audit, mais on met à jour pour l'UI
+            # 3. Mouvement des fonds (Double entrée)
             sender = db.query(User).filter(User.public_key == tx.sender_pk).first()
-            if sender: 
+            if sender:
+                # On libère l'argent du coffre-fort hors-ligne du client
                 sender.offline_reserved_atomic -= tx.amount
             
+            # On crédite le marchand
             merchant.balance_atomic += tx.amount
 
-            # 5. ARCHIVAGE (CRITIQUE)
+            # 4. ARCHIVAGE DE LA PREUVE
             new_tx = Transaction(
                 transaction_uuid=tx.uuid,
                 protocol_ver=tx.protocol_ver,
                 
-                # MAPPING SCHEMA -> MODEL
-                sender_pubk_hash=tx.sender_pk,      # Schema: sender_pk -> Model: sender_pubk_hash
-                receiver_pubk_hash=batch.merchant_pk, # Le receiver est le marchand qui sync
+                # MAPPING
+                sender_pubk_hash=tx.sender_pk,      
+                receiver_pubk_hash=batch.merchant_pk, 
                 
                 amount_atomic=tx.amount,       
                 currency_code=tx.currency,
@@ -60,7 +60,6 @@ def sync_batch_transactions(batch: TransactionBatchRequest, db: Session = Depend
                 status="COMPLETED",
                 is_offline_synced=True,
                 
-                # 🔥 C'EST ICI QUE TOUT SE JOUE POUR L'AUDIT
                 metadata_blob=tx.metadata 
             )
 
@@ -68,14 +67,25 @@ def sync_batch_transactions(batch: TransactionBatchRequest, db: Session = Depend
                 db.add(new_tx)
                 db.commit() 
                 report["processed"] += 1
+                
+                # ✅ AJOUTÉ AU REÇU POUR LE TÉLÉPHONE
+                synced_uuids.append(tx.uuid) 
+                
             except IntegrityError:
                 db.rollback() 
                 continue 
 
         except Exception as e:
-            # On ne plante pas tout le batch pour une erreur
+            # On ne fait pas crasher toute la boucle si UNE transaction échoue
             report["failed"] += 1
             report["errors"].append({"uuid": tx.uuid, "msg": str(e)})
 
-    report["status"] = "success" if report["failed"] == 0 else "partial_success"
-    return report
+    # 5. RÉPONSE AU TÉLÉPHONE (LE FAMEUX HANDSHAKE)
+    status = "success" if report["failed"] == 0 else "partial_success"
+    
+    return {
+        "message": "Synchronisation terminée",
+        "processed_count": report["processed"],
+        "status": status,
+        "synced_uuids": synced_uuids  # <-- Flutter va lire ça pour mettre à jour l'écran !
+    }
