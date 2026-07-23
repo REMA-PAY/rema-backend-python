@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     
     # SECURITE
     # (Garde ta clé secrète actuelle si tu l'as changée, sinon utilise celle-ci pour le dev)
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "remplacez_moi_par_une_cle_ultra_securisee_et_longue")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "CHANGE_ME")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 

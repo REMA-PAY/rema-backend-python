@@ -36,10 +36,10 @@ def root():
 
 # ⚠️ ROUTE DANGEREUSE : RÉINITIALISATION DB
 # À utiliser UNIQUEMENT pour nettoyer la base après le changement de type (Float -> Int)
-# URL: /sys/dangerous-reset-db?admin_key=REMA_MASTER_RESET_2026
+# URL: /sys/dangerous-reset-db?admin_key=<ADMIN_RESET_KEY from env>
 @app.get("/sys/dangerous-reset-db")
 def reset_database(admin_key: str):
-    SECRET_KEY = "REMA_MASTER_RESET_2026"
+    SECRET_KEY = os.getenv("ADMIN_RESET_KEY", "CHANGE_ME")
     
     if admin_key != SECRET_KEY:
         raise HTTPException(status_code=403, detail="Accès refusé. Clé incorrecte.")

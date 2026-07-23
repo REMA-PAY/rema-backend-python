@@ -1,3 +1,4 @@
+import os
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from fastapi import Depends, status, HTTPException
@@ -9,7 +10,7 @@ from app.core import database
 from . import schemas, models
 
 # --- CONFIGURATION SÉCURITÉ ---
-SECRET_KEY = "rema_industrial_secret_key_super_secure_2026" 
+SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_ME") 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
